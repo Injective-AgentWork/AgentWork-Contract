@@ -298,24 +298,18 @@ mod tests {
 
         agent_work_addr
     }
- 
-    #[test]
-    fn test_user_stake() {
-        let mut app = App::default();
-        let admin = app.api().addr_make("admin");
-        let user1 = app.api().addr_make("user1");
-        let user2 = app.api().addr_make("user2");
-        let agent1 = app.api().addr_make("agent1");
-        let agent2 = app.api().addr_make("agent2");
-        let agent3 = app.api().addr_make("agent3");
-
-        // set up cw20 contract
-        let cw20_addr = setup_cw20_contract(&mut app, admin.clone());
-        // set up agent work contract
-        let agent_work_addr = setup_agent_work_contract(&mut app, admin.clone(), cw20_addr.clone());
-
     
-        // send TTK to user1 and user2
+    fn allocate_token(
+        app: &mut App,
+        admin: Addr,
+        cw20_addr: Addr,
+        user1: Addr,
+        user2: Addr,
+        agent1: Addr,
+        agent2: Addr,
+        agent3: Addr
+    ) {
+        // send 500 TTK to user1, user2, agent1, agent2, agent3
         app.execute_contract(
             admin.clone(),
             cw20_addr.clone(),
@@ -334,14 +328,61 @@ mod tests {
             } ,
             &[]
         ).unwrap();
+        app.execute_contract(
+            admin.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::Transfer { 
+                recipient: agent1.to_string(), 
+                amount: Uint128::new(500), 
+            } ,
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            admin.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::Transfer { 
+                recipient: agent2.to_string(), 
+                amount: Uint128::new(500), 
+            } ,
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            admin.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::Transfer { 
+                recipient: agent3.to_string(), 
+                amount: Uint128::new(500), 
+            } ,
+            &[]
+        ).unwrap();
 
-        // user1 give allowance and stake 100 TTK
+    }
+ 
+    #[test]
+    fn test_user_stake_and_unstake() {
+        let mut app = App::default();
+        let admin = app.api().addr_make("admin");
+        let user1 = app.api().addr_make("user1");
+        let user2 = app.api().addr_make("user2");
+        let agent1 = app.api().addr_make("agent1");
+        let agent2 = app.api().addr_make("agent2");
+        let agent3 = app.api().addr_make("agent3");
+
+        // set up cw20 contract
+        let cw20_addr = setup_cw20_contract(&mut app, admin.clone());
+        // set up agent work contract
+        let agent_work_addr = setup_agent_work_contract(&mut app, admin.clone(), cw20_addr.clone());
+        // allocate 500 TTK to user1 and user2
+        allocate_token(&mut app, admin.clone(), cw20_addr.clone(), user1.clone(), user2.clone(), agent1.clone(), agent2.clone(), agent3.clone());
+    
+        
+        // user1 give allowance and stake 200 TTK
         app.execute_contract(
             user1.clone(),
             cw20_addr.clone(),
             &Cw20ExecuteMsg::IncreaseAllowance {
                 spender: agent_work_addr.to_string(),
-                amount: Uint128::new(100),
+                amount: Uint128::new(200),
                 expires: None,
             },
             &[]
@@ -350,12 +391,152 @@ mod tests {
             user1.clone(),
             agent_work_addr.clone(),
             &ExecuteMsg::UserStake { 
-                amount: Uint128::new(100),
+                amount: Uint128::new(200),
             },
             &[]
         ).unwrap();        
         assert!(response.events.iter().any(|e| e.ty == "wasm" && e.attributes.iter().any(|attr| attr.key == "action" && attr.value == "user stake")));
 
+        // check whether current user1 balance is 300 and user1 stake is 200
+        let user1_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: user1.to_string(),
+                }
+            ).unwrap();
+        assert_eq!(user1_balance.balance, Uint128::new(300));
+        let user1_stake: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetUserStake {
+                    user_addr: user1.clone(),
+                }
+            ).unwrap();
+        assert_eq!(user1_stake, Uint128::new(200));
 
+        // user1 unstake 100
+        let response = app.execute_contract(
+            user1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::UserUnstake { 
+                amount: Uint128::new(100),
+            },
+            &[]
+        ).unwrap();
+        assert!(response.events.iter().any(|e| e.ty == "wasm" && e.attributes.iter().any(|attr| attr.key == "action" && attr.value == "user unstake")));
+
+        // check whether current user1 balance is 500 and user1 stake is 100
+        let user1_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: user1.to_string(),
+                }
+            ).unwrap();
+        assert_eq!(user1_balance.balance, Uint128::new(400));
+        let user1_stake: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetUserStake {
+                    user_addr: user1.clone(),
+                }
+            ).unwrap();
+        assert_eq!(user1_stake, Uint128::new(100));
+    }
+
+    #[test]
+    fn test_agent_stake_and_unstake() {
+        let mut app = App::default();
+        let admin = app.api().addr_make("admin");
+        let user1 = app.api().addr_make("user1");
+        let user2 = app.api().addr_make("user2");
+        let agent1 = app.api().addr_make("agent1");
+        let agent2 = app.api().addr_make("agent2");
+        let agent3 = app.api().addr_make("agent3");
+
+        // set up cw20 contract
+        let cw20_addr = setup_cw20_contract(&mut app, admin.clone());
+        // set up agent work contract
+        let agent_work_addr = setup_agent_work_contract(&mut app, admin.clone(), cw20_addr.clone());
+        // allocate 500 TTK to user1, user2, agent1, agent2, agent3
+        allocate_token(&mut app, admin.clone(), cw20_addr.clone(), user1.clone(), user2.clone(), agent1.clone(), agent2.clone(), agent3.clone());
+    
+        
+        // agent1 give allowance and stake 200 TTK
+        app.execute_contract(
+            agent1.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(200),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        let response = app.execute_contract(
+            agent1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::AgentStake { 
+                amount: Uint128::new(200),
+            },
+            &[]
+        ).unwrap();        
+        assert!(response.events.iter().any(|e| e.ty == "wasm" && e.attributes.iter().any(|attr| attr.key == "action" && attr.value == "agent stake")));
+
+        // check whether current agent1 balance is 300 and agent1 stake is 200
+        let agent1_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: agent1.to_string(),
+                }
+            ).unwrap();
+        assert_eq!(agent1_balance.balance, Uint128::new(300));
+        let agent1_stake: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetAgentStake {
+                    agent_addr: agent1.clone(),
+                }
+            )
+            .unwrap();
+        assert_eq!(agent1_stake, Uint128::new(200));
+
+        // agent1 unstake 100
+        let response = app.execute_contract(
+            agent1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::AgentUnstake { 
+                amount: Uint128::new(100),
+            },
+            &[]
+        ).unwrap();
+
+        // check whether current agent1 balance is 400 and agent1 stake is 100
+        let agent1_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: agent1.to_string(),
+                }
+            ).unwrap();
+        assert_eq!(agent1_balance.balance, Uint128::new(400));
+        let agent1_stake: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetAgentStake {
+                    agent_addr: agent1.clone(),
+                }
+            ).unwrap();
+        assert_eq!(agent1_stake, Uint128::new(100));
     }
 }
