@@ -29,4 +29,23 @@ pub enum ExecuteMsg {
 
 #[cw_serde]
 #[derive(QueryResponses)]
-pub enum QueryMsg {}
+pub enum QueryMsg {
+    #[returns(Uint128)]
+    GetUserStake {
+        user_addr: Addr,
+    },
+
+    #[returns(Uint128)]
+    GetAgentStake {
+        agent_addr: Addr,
+    },
+
+    #[returns(TokenInfoResponse)]
+    GetTokenInfo {},
+}
+
+#[cw_serde]
+pub struct TokenInfoResponse {
+    pub token_denom: String,
+    pub token_address: Addr,
+}

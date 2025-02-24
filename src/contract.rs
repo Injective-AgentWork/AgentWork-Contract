@@ -196,8 +196,40 @@ pub mod execute {
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
-    unimplemented!()
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::GetUserStake { user_addr } => query::get_user_stake(deps, user_addr),
+        QueryMsg::GetAgentStake { agent_addr } => query::get_agent_stake(deps, agent_addr),
+        QueryMsg::GetTokenInfo {  } => query::get_token_info(deps),
+    }
+}
+
+pub mod query {
+    use cosmwasm_std::to_json_binary;
+
+    use super::*;
+    pub fn get_user_stake(
+        deps: Deps,
+        user_addr: Addr
+    ) -> StdResult<Binary> {
+        let user_stake_amount = USER_STAKE.load(deps.storage, user_addr).unwrap_or(Uint128::zero());
+        to_json_binary(&user_stake_amount)
+    }
+
+    pub fn get_agent_stake(
+        deps: Deps,
+        agent_addr: Addr
+    ) -> StdResult<Binary> {
+        let agent_stake_amount = AGENT_STAKE.load(deps.storage, agent_addr).unwrap_or(Uint128::zero());
+        to_json_binary(&agent_stake_amount)
+    }
+
+    pub fn get_token_info(
+        deps: Deps
+    ) -> StdResult<Binary> {
+        let token_info = TOKEN_INFO.load(deps.storage)?;
+        to_json_binary(&token_info)
+    }
 }
 
 #[cfg(test)]
