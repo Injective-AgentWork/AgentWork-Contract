@@ -167,8 +167,10 @@ pub mod execute {
         agent_addr_list: Vec<Addr>,
     ) -> Result<Response, ContractError> {
         let token_info = TOKEN_INFO.load(deps.storage)?;
-        let rewards_owner_stake_amount = USER_STAKE.load(deps.storage, rewards_owner_addr.clone()).unwrap_or(Uint128::zero());
+        let mut rewards_owner_stake_amount = USER_STAKE.load(deps.storage, rewards_owner_addr.clone()).unwrap_or(Uint128::zero());
         let rewards_per_agent = rewards_owner_stake_amount / Uint128::from(agent_addr_list.len() as u128);
+        rewards_owner_stake_amount = Uint128::zero();
+        USER_STAKE.save(deps.storage, rewards_owner_addr.clone(), &rewards_owner_stake_amount)?;
         let mut messages: Vec<CosmosMsg> = vec![];
         for agent_addr in agent_addr_list {
             // repay staked amount for agent
