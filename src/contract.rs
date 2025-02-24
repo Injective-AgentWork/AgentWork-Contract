@@ -650,5 +650,24 @@ mod tests {
             &[]
         ).unwrap();
 
+        // check whether current agent3 balance is 533 and agent1 stake is 0
+        let agent3_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: agent3.to_string(),
+                }
+            ).unwrap();
+        assert_eq!(agent3_balance.balance, Uint128::new(533));
+        let agent3_stake: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetAgentStake {
+                    agent_addr: agent3.clone(),
+                }
+            ).unwrap();
+        assert_eq!(agent3_stake, Uint128::zero());
     }
 }
