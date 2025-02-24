@@ -168,19 +168,19 @@ pub mod execute {
     ) -> Result<Response, ContractError> {
         let token_info = TOKEN_INFO.load(deps.storage)?;
         let rewards_owner_stake_amount = USER_STAKE.load(deps.storage, rewards_owner_addr.clone()).unwrap_or(Uint128::zero());
-        let mut rewards_per_agent = rewards_owner_stake_amount / Uint128::from(agent_addr_list.len() as u128);
+        let rewards_per_agent = rewards_owner_stake_amount / Uint128::from(agent_addr_list.len() as u128);
         let mut messages: Vec<CosmosMsg> = vec![];
         for agent_addr in agent_addr_list {
             // repay staked amount for agent
             let mut agent_stake_amount = AGENT_STAKE.load(deps.storage, agent_addr.clone()).unwrap_or(Uint128::zero());
-            rewards_per_agent += agent_stake_amount;
+            let repay_amount = agent_stake_amount + rewards_per_agent;
             agent_stake_amount = Uint128::zero();
             AGENT_STAKE.save(deps.storage, agent_addr.clone(), &agent_stake_amount)?;
 
             // send rewards to agent
             let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
                 recipient: agent_addr.to_string(),
-                amount: rewards_per_agent,
+                amount: repay_amount,
             };
 
             let msg = CosmosMsg::Wasm(WasmMsg::Execute {
@@ -538,5 +538,117 @@ mod tests {
                 }
             ).unwrap();
         assert_eq!(agent1_stake, Uint128::new(100));
+    }
+
+    #[test]
+    fn test_distribute_rewards() {
+        let mut app = App::default();
+        let admin = app.api().addr_make("admin");
+        let user1 = app.api().addr_make("user1");
+        let user2 = app.api().addr_make("user2");
+        let agent1 = app.api().addr_make("agent1");
+        let agent2 = app.api().addr_make("agent2");
+        let agent3 = app.api().addr_make("agent3");
+
+        // set up cw20 contract
+        let cw20_addr = setup_cw20_contract(&mut app, admin.clone());
+        // set up agent work contract
+        let agent_work_addr = setup_agent_work_contract(&mut app, admin.clone(), cw20_addr.clone());
+        // allocate 500 TTK to user1, user2, agent1, agent2, agent3
+        allocate_token(&mut app, admin.clone(), cw20_addr.clone(), user1.clone(), user2.clone(), agent1.clone(), agent2.clone(), agent3.clone());
+    
+        
+        // user1 give allowance and stake 100 TTK
+        app.execute_contract(
+            user1.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(100),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            user1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::UserStake { 
+                amount: Uint128::new(100),
+            },
+            &[]
+        ).unwrap();        
+
+        // agent1 give allowance and stake 10 TTK
+        app.execute_contract(
+            agent1.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(10),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            agent1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::AgentStake { 
+                amount: Uint128::new(10),
+            },
+            &[]
+        ).unwrap();        
+
+        // agent2 give allowance and stake 10 TTK
+        app.execute_contract(
+            agent2.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(10),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            agent2.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::AgentStake { 
+                amount: Uint128::new(10),
+            },
+            &[]
+        ).unwrap(); 
+
+        // agent3 give allowance and stake 10 TTK
+        app.execute_contract(
+            agent3.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(10),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            agent3.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::AgentStake { 
+                amount: Uint128::new(10),
+            },
+            &[]
+        ).unwrap(); 
+
+        // distribute rewards
+        let agent_addr_list: Vec<Addr> = vec![agent1.clone(), agent2.clone(), agent3.clone()];
+        let response = app.execute_contract(
+            user1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::DistributeRewards { 
+                rewards_owner_addr: user1.clone(),
+                agent_addr_list,
+            },
+            &[]
+        ).unwrap();
+
     }
 }
