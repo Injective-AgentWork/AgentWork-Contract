@@ -176,6 +176,12 @@ pub mod execute {
             rewards_per_agent += agent_stake_amount;
             agent_stake_amount = Uint128::zero();
             AGENT_STAKE.save(deps.storage, agent_addr.clone(), &agent_stake_amount)?;
+            
+            // send rewards to agent
+            let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
+                recipient: agent_addr.to_string(),
+                amount: rewards_per_agent,
+            };
 
             let msg = CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: token_info.token_address.to_string(),
