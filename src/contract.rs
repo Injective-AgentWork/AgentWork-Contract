@@ -76,7 +76,7 @@ pub mod execute {
             funds: info.funds
         });
 
-        Ok(Response::new().add_attribute("method", "user stake").add_message(msg))
+        Ok(Response::new().add_attribute("action", "user stake").add_message(msg))
     }
     
     pub fn user_unstake(
@@ -104,7 +104,7 @@ pub mod execute {
             funds: info.funds
         });
 
-        Ok(Response::new().add_attribute("method", "user unstake").add_message(msg))
+        Ok(Response::new().add_attribute("action", "user unstake").add_message(msg))
     }
 
     pub fn agent_stake(
@@ -130,7 +130,7 @@ pub mod execute {
             funds: info.funds
         });
 
-        Ok(Response::new().add_attribute("method", "agent stake").add_message(msg))
+        Ok(Response::new().add_attribute("action", "agent stake").add_message(msg))
     }
 
     pub fn agent_unstake(
@@ -158,7 +158,7 @@ pub mod execute {
             funds: info.funds
         });
 
-        Ok(Response::new().add_attribute("method", "agent unstake").add_message(msg))
+        Ok(Response::new().add_attribute("action", "agent unstake").add_message(msg))
     }
 
     pub fn distribute_rewards(
@@ -176,7 +176,7 @@ pub mod execute {
             rewards_per_agent += agent_stake_amount;
             agent_stake_amount = Uint128::zero();
             AGENT_STAKE.save(deps.storage, agent_addr.clone(), &agent_stake_amount)?;
-            
+
             // send rewards to agent
             let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
                 recipient: agent_addr.to_string(),
@@ -190,7 +190,7 @@ pub mod execute {
             });
             messages.push(msg);
         }
-        Ok(Response::new().add_messages(messages))
+        Ok(Response::new().add_attribute("action", "distribute rewards").add_messages(messages))
     }    
 
 }
@@ -201,4 +201,129 @@ pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use std::usize;
+
+    use cosmwasm_std::{Addr, Uint128};
+    use cw_multi_test::{App, BankKeeper, ContractWrapper, Executor, IntoAddr};
+
+    use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20QueryMsg};
+    use cw20_base::msg::InstantiateMsg as Cw20InstantiateMsg;
+ 
+    use super::*;
+
+    fn setup_cw20_contract(app: &mut App, admin: Addr) -> Addr {
+        let cw20_code = ContractWrapper::new(
+            cw20_base::contract::execute,
+            cw20_base::contract::instantiate,
+            cw20_base::contract::query,
+        );
+        let cw20_code_id = app.store_code(Box::new(cw20_code));
+
+        let cw20_addr = app
+            .instantiate_contract(
+                cw20_code_id,
+                admin.clone(),
+                &Cw20InstantiateMsg {
+                    name: "Test Token".to_string(),
+                    symbol: "TTK".to_string(),
+                    decimals: 6,
+                    initial_balances: vec![Cw20Coin {
+                        address: admin.to_string(),
+                        amount: Uint128::new(1000000),
+                    }],
+                    mint: None,
+                    marketing: None,
+                },
+                &[],
+                "CW20 Test Token",
+                None
+            ).unwrap();
+
+        cw20_addr
+    }
+
+    fn setup_agent_work_contract(app: &mut App, admin: Addr, cw20_addr: Addr) -> Addr {
+        let agent_work_code = ContractWrapper::new(
+            execute,
+            instantiate,
+            query,
+        );
+        let agent_work_code_id = app.store_code(Box::new(agent_work_code));
+        
+        let agent_work_addr = app
+            .instantiate_contract(
+                agent_work_code_id,
+                admin.clone(),
+                &InstantiateMsg {
+                    token_symbol: "TTK".to_string(),
+                    token_contract_addr: cw20_addr.clone(),
+                },
+                &[],
+                "Agent Work",
+                None
+            ).unwrap();
+
+        agent_work_addr
+    }
+ 
+    #[test]
+    fn test_user_stake() {
+        let mut app = App::default();
+        let admin = app.api().addr_make("admin");
+        let user1 = app.api().addr_make("user1");
+        let user2 = app.api().addr_make("user2");
+        let agent1 = app.api().addr_make("agent1");
+        let agent2 = app.api().addr_make("agent2");
+        let agent3 = app.api().addr_make("agent3");
+
+        // set up cw20 contract
+        let cw20_addr = setup_cw20_contract(&mut app, admin.clone());
+        // set up agent work contract
+        let agent_work_addr = setup_agent_work_contract(&mut app, admin.clone(), cw20_addr.clone());
+
+    
+        // send TTK to user1 and user2
+        app.execute_contract(
+            admin.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::Transfer { 
+                recipient: user1.to_string(), 
+                amount: Uint128::new(500), 
+            } ,
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            admin.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::Transfer { 
+                recipient: user2.to_string(), 
+                amount: Uint128::new(500), 
+            } ,
+            &[]
+        ).unwrap();
+
+        // user1 give allowance and stake 100 TTK
+        app.execute_contract(
+            user1.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(100),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        let response = app.execute_contract(
+            user1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::UserStake { 
+                amount: Uint128::new(100),
+            },
+            &[]
+        ).unwrap();        
+        assert!(response.events.iter().any(|e| e.ty == "wasm" && e.attributes.iter().any(|attr| attr.key == "action" && attr.value == "user stake")));
+
+
+    }
+}
