@@ -1,1 +1,1 @@
-bc5ec79a8e7e1ca16b02323ed8d57a48746d937e20da8879faa934b5de45aba9  injective_agent_work.wasm
+efe2208a8526712ec8f0f2c67095f55c101ea9a88afb1e9a667a9d79674e0512  injective_agent_work.wasm

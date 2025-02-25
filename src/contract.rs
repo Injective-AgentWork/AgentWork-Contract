@@ -54,7 +54,7 @@ pub fn execute(
             rewards_owner_addr,
             agent_list,
         } => execute::distribute_rewards_by_time(deps, rewards_owner_addr, agent_list),
-        ExecuteMsg::JurorVote { is_accept } => execute::juror_vote(deps, env, info, is_accept),
+        ExecuteMsg::JurorVote { is_accept } => execute::juror_vote(deps, info, is_accept),
         ExecuteMsg::ResetVote {} => execute::reset_vote(deps),
     }
 }
@@ -281,11 +281,10 @@ pub mod execute {
 
     pub fn juror_vote(
         deps: DepsMut,
-        env: Env,
         info: MessageInfo,
         is_accept: bool,
     ) -> Result<Response, ContractError> {
-        let accpect_vote = ACCPECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
+        let accept_vote = ACCEPT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
         let reject_vote = REJECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
         let is_juror_voted = IS_JUROR_VOTED
             .load(deps.storage, info.sender.clone())
@@ -296,7 +295,7 @@ pub mod execute {
             IS_JUROR_VOTED.save(deps.storage, info.sender.clone(), &true)?;
         }
         if is_accept {
-            ACCPECT_VOTE.save(deps.storage, &(accpect_vote + Uint128::new(1)))?;
+            ACCEPT_VOTE.save(deps.storage, &(accept_vote + Uint128::new(1)))?;
         } else {
             REJECT_VOTE.save(deps.storage, &(reject_vote + Uint128::new(1)))?;
         }
@@ -304,7 +303,7 @@ pub mod execute {
     }
 
     pub fn reset_vote(deps: DepsMut) -> Result<Response, ContractError> {
-        ACCPECT_VOTE.save(deps.storage, &Uint128::zero())?;
+        ACCEPT_VOTE.save(deps.storage, &Uint128::zero())?;
         REJECT_VOTE.save(deps.storage, &Uint128::zero())?;
         IS_JUROR_VOTED.clear(deps.storage);
         Ok(Response::new().add_attribute("action", "reset vote"))
@@ -367,11 +366,11 @@ pub mod query {
     }
 
     pub fn get_vote_result(deps: Deps) -> StdResult<Binary> {
-        let accpect_vote = ACCPECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
+        let accept_vote = ACCEPT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
         let reject_vote = REJECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
         let vote_result = VoteResultResponse {
-            accept_vote: accpect_vote,
-            reject_vote: reject_vote,
+            accept_vote,
+            reject_vote,
         };
         to_json_binary(&vote_result)
     }
@@ -1064,7 +1063,7 @@ mod tests {
             agent3.clone(),
         );
 
-        // Agent 1 Vote Accpect
+        // Agent 1 Vote accept
         app.execute_contract(
             agent1.clone(),
             agent_work_addr.clone(),
@@ -1073,7 +1072,7 @@ mod tests {
         )
         .unwrap();
 
-        // Agent 2 vote Accpect
+        // Agent 2 vote accept
         app.execute_contract(
             agent2.clone(),
             agent_work_addr.clone(),

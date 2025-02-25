@@ -13,6 +13,6 @@ pub const USER_STAKE: Map<Addr, Uint128> = Map::new("user_stake");
 
 pub const AGENT_STAKE: Map<Addr, Uint128> = Map::new("agent_stake");
 
-pub const ACCPECT_VOTE: Item<Uint128> = Item::new("accpect_vote");
+pub const ACCEPT_VOTE: Item<Uint128> = Item::new("accpect_vote");
 pub const REJECT_VOTE: Item<Uint128> = Item::new("reject_vote");
 pub const IS_JUROR_VOTED: Map<Addr, bool> = Map::new("is_juror_voted");
