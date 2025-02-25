@@ -34,7 +34,11 @@ pub enum ExecuteMsg {
     DistributeRewardsByTime {
         rewards_owner_addr: Addr,
         agent_list: Vec<AgentCost>,
-    }
+    },
+    JurorVote {
+        is_accept: bool,
+    },
+    ResetVote {},
 }
 
 #[cw_serde]
@@ -57,7 +61,17 @@ pub enum QueryMsg {
     CheckIfEnoughRewards {
         rewards_owner_addr: Addr,
         agent_list: Vec<AgentCost>,
-    }
+    },
+
+    #[returns(VoteResultResponse)]
+    GetVoteResult {},
+    
+}
+
+#[cw_serde]
+pub struct VoteResultResponse {
+    pub accept_vote: Uint128,
+    pub reject_vote: Uint128,
 }
 
 #[cw_serde]

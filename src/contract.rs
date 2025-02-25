@@ -4,7 +4,7 @@ use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
 // use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, AgentCost};
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, AgentCost, VoteResultResponse};
 use crate::state::*;
 
 /*
@@ -46,7 +46,9 @@ pub fn execute(
         ExecuteMsg::AgentStake { amount } => execute::agent_stake(deps, env, info, amount),
         ExecuteMsg::AgentUnstake { amount } => execute::agent_unstake(deps, info, amount),
         ExecuteMsg::DistributeRewardsByAgent { rewards_owner_addr, agent_addr_list} => execute::distribute_rewards_by_agent(deps, rewards_owner_addr, agent_addr_list),
-        ExecuteMsg::DistributeRewardsByTime { rewards_owner_addr, agent_list } => execute::distribute_rewards_by_time(deps, rewards_owner_addr, agent_list)
+        ExecuteMsg::DistributeRewardsByTime { rewards_owner_addr, agent_list } => execute::distribute_rewards_by_time(deps, rewards_owner_addr, agent_list),
+        ExecuteMsg::JurorVote { is_accept } => execute::juror_vote(deps, env, info, is_accept),
+        ExecuteMsg::ResetVote {  } => execute::reset_vote(deps),
     }
 }
 
@@ -228,9 +230,39 @@ pub mod execute {
         }
         rewards_owner_stake_amount -= total_cost_per_unit_time;
         USER_STAKE.save(deps.storage, rewards_owner_addr.clone(), &rewards_owner_stake_amount)?;
-        Ok(Response::new().add_attribute("action", "distribution rewards by time").add_messages(messages))
+        Ok(Response::new().add_attribute("action", "distribution rewards by time unit").add_messages(messages))
     }
 
+    pub fn juror_vote(
+        deps: DepsMut, 
+        env: Env,
+        info: MessageInfo,
+        is_accept: bool
+    ) -> Result<Response, ContractError> {
+        let accpect_vote = ACCPECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
+        let reject_vote = REJECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
+        let is_juror_voted = IS_JUROR_VOTED.load(deps.storage, info.sender.clone()).unwrap_or(false);
+        if is_juror_voted {
+            return Err(ContractError::AlreadyVoted {});
+        } else {
+            IS_JUROR_VOTED.save(deps.storage, info.sender.clone(), &true)?;
+        }
+        if is_accept {
+            ACCPECT_VOTE.save(deps.storage, &(accpect_vote + Uint128::new(1)))?;
+        } else {
+            REJECT_VOTE.save(deps.storage, &(reject_vote + Uint128::new(1)))?;
+        }
+        Ok(Response::new().add_attribute("action", "juror vote"))
+    }
+
+    pub fn reset_vote(
+        deps: DepsMut
+    ) -> Result<Response, ContractError> {
+        ACCPECT_VOTE.save(deps.storage, &Uint128::zero())?;
+        REJECT_VOTE.save(deps.storage, &Uint128::zero())?;
+        IS_JUROR_VOTED.clear(deps.storage);
+        Ok(Response::new().add_attribute("action", "reset vote"))
+    }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -240,6 +272,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::GetAgentStake { agent_addr } => query::get_agent_stake(deps, agent_addr),
         QueryMsg::GetTokenInfo {  } => query::get_token_info(deps),
         QueryMsg::CheckIfEnoughRewards { rewards_owner_addr, agent_list } => to_json_binary(&query::check_if_enough_rewards(deps, rewards_owner_addr, agent_list)),
+        QueryMsg::GetVoteResult {  } => query::get_vote_result(deps),
     }
 }
 
@@ -280,6 +313,18 @@ pub mod query {
             total_cost_per_unit_time += agent.cost_per_unit_time;
         }
         rewards_owner_stake_amount >= total_cost_per_unit_time
+    }
+
+    pub fn get_vote_result(
+        deps: Deps
+    ) -> StdResult<Binary> {
+        let accpect_vote = ACCPECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
+        let reject_vote = REJECT_VOTE.load(deps.storage).unwrap_or(Uint128::zero());
+        let vote_result = VoteResultResponse {
+            accept_vote: accpect_vote,
+            reject_vote: reject_vote,
+        };
+        to_json_binary(&vote_result)
     }
 }
 
@@ -859,4 +904,63 @@ mod tests {
             ).unwrap();
         assert_eq!(agent1_stake, Uint128::new(10));
     }
+
+    #[test]
+    fn test_juror_vote() {
+        let mut app = App::default();
+        let admin = app.api().addr_make("admin");
+        let user1 = app.api().addr_make("user1");
+        let user2 = app.api().addr_make("user2");
+        let agent1 = app.api().addr_make("agent1");
+        let agent2 = app.api().addr_make("agent2");
+        let agent3 = app.api().addr_make("agent3");
+
+        // set up cw20 contract
+        let cw20_addr = setup_cw20_contract(&mut app, admin.clone());
+        // set up agent work contract
+        let agent_work_addr = setup_agent_work_contract(&mut app, admin.clone(), cw20_addr.clone());
+        // allocate 500 TTK to user1, user2, agent1, agent2, agent3
+        allocate_token(&mut app, admin.clone(), cw20_addr.clone(), user1.clone(), user2.clone(), agent1.clone(), agent2.clone(), agent3.clone());
+    
+        // Agent 1 Vote Accpect
+        app.execute_contract(
+            agent1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::JurorVote { 
+                is_accept: true,
+            },
+            &[]
+        ).unwrap();    
+
+        // Agent 2 vote Accpect
+        app.execute_contract(
+            agent2.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::JurorVote { 
+                is_accept: true,
+            },
+            &[]
+        ).unwrap();
+
+        // Agent 3 vote reject
+        app.execute_contract(
+            agent3.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::JurorVote { 
+                is_accept: false,
+            },
+            &[]
+        ).unwrap();   
+
+        let vote_result: VoteResultResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetVoteResult { 
+                }
+            ).unwrap();
+
+        assert_eq!(vote_result.accept_vote, Uint128::new(2));
+        assert_eq!(vote_result.reject_vote, Uint128::new(1));
+    } 
 }
