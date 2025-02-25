@@ -1,10 +1,10 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, Addr};
+use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, Addr, to_json_binary};
 // use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, AgentCost};
 use crate::state::*;
 
 /*
@@ -45,7 +45,8 @@ pub fn execute(
         ExecuteMsg::UserUnstake { amount } => execute::user_unstake(deps, info, amount),
         ExecuteMsg::AgentStake { amount } => execute::agent_stake(deps, env, info, amount),
         ExecuteMsg::AgentUnstake { amount } => execute::agent_unstake(deps, info, amount),
-        ExecuteMsg::DistributeRewards { rewards_owner_addr, agent_addr_list} => execute::distribute_rewards(deps, rewards_owner_addr, agent_addr_list),
+        ExecuteMsg::DistributeRewardsByAgent { rewards_owner_addr, agent_addr_list} => execute::distribute_rewards_by_agent(deps, rewards_owner_addr, agent_addr_list),
+        ExecuteMsg::DistributeRewardsByTime { rewards_owner_addr, agent_list } => execute::distribute_rewards_by_time(deps, rewards_owner_addr, agent_list)
     }
 }
 
@@ -161,7 +162,7 @@ pub mod execute {
         Ok(Response::new().add_attribute("action", "agent unstake").add_message(msg))
     }
 
-    pub fn distribute_rewards(
+    pub fn distribute_rewards_by_agent(
         deps: DepsMut,
         rewards_owner_addr: Addr,
         agent_addr_list: Vec<Addr>,
@@ -192,8 +193,43 @@ pub mod execute {
             });
             messages.push(msg);
         }
-        Ok(Response::new().add_attribute("action", "distribute rewards").add_messages(messages))
+        Ok(Response::new().add_attribute("action", "distribution rewards by agent").add_messages(messages))
     }    
+
+    pub fn distribute_rewards_by_time(
+        deps: DepsMut,
+        rewards_owner_addr: Addr,
+        agent_list: Vec<AgentCost>,
+    ) -> Result<Response, ContractError> {
+        let token_info = TOKEN_INFO.load(deps.storage)?;
+        let mut rewards_owner_stake_amount = USER_STAKE.load(deps.storage, rewards_owner_addr.clone()).unwrap_or(Uint128::zero());
+        if !query::check_if_enough_rewards(deps.as_ref(), rewards_owner_addr.clone(), agent_list.clone()) {
+            return Err(ContractError::InsufficientStake {})
+        }
+        let mut messages: Vec<CosmosMsg> = vec![];
+        let mut total_cost_per_unit_time = Uint128::zero();
+        for agent in agent_list {
+            let agent_addr = agent.addr;
+            let cost_per_unit_time = agent.cost_per_unit_time;
+            total_cost_per_unit_time += cost_per_unit_time;
+            
+            // send rewards to agent
+            let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
+                recipient: agent_addr.to_string(),
+                amount: cost_per_unit_time,
+            };
+
+            let msg = CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: token_info.token_address.to_string(),
+                msg: to_json_binary(&transfer_msg)?,
+                funds: vec![]
+            });
+            messages.push(msg);
+        }
+        rewards_owner_stake_amount -= total_cost_per_unit_time;
+        USER_STAKE.save(deps.storage, rewards_owner_addr.clone(), &rewards_owner_stake_amount)?;
+        Ok(Response::new().add_attribute("action", "distribution rewards by time").add_messages(messages))
+    }
 
 }
 
@@ -203,13 +239,13 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::GetUserStake { user_addr } => query::get_user_stake(deps, user_addr),
         QueryMsg::GetAgentStake { agent_addr } => query::get_agent_stake(deps, agent_addr),
         QueryMsg::GetTokenInfo {  } => query::get_token_info(deps),
+        QueryMsg::CheckIfEnoughRewards { rewards_owner_addr, agent_list } => to_json_binary(&query::check_if_enough_rewards(deps, rewards_owner_addr, agent_list)),
     }
 }
 
 pub mod query {
-    use cosmwasm_std::to_json_binary;
-
     use super::*;
+    
     pub fn get_user_stake(
         deps: Deps,
         user_addr: Addr
@@ -231,6 +267,19 @@ pub mod query {
     ) -> StdResult<Binary> {
         let token_info = TOKEN_INFO.load(deps.storage)?;
         to_json_binary(&token_info)
+    }
+
+    pub fn check_if_enough_rewards(
+        deps: Deps,
+        rewards_owner_addr: Addr,
+        agent_list: Vec<AgentCost>
+    ) -> bool {
+        let rewards_owner_stake_amount = USER_STAKE.load(deps.storage, rewards_owner_addr).unwrap_or(Uint128::zero());
+        let mut total_cost_per_unit_time = Uint128::zero();
+        for agent in agent_list {
+            total_cost_per_unit_time += agent.cost_per_unit_time;
+        }
+        rewards_owner_stake_amount >= total_cost_per_unit_time
     }
 }
 
@@ -430,7 +479,7 @@ mod tests {
         ).unwrap();
         assert!(response.events.iter().any(|e| e.ty == "wasm" && e.attributes.iter().any(|attr| attr.key == "action" && attr.value == "user unstake")));
 
-        // check whether current user1 balance is 500 and user1 stake is 100
+        // check whether current user1 balance is 400 and user1 stake is 100
         let user1_balance: cw20::BalanceResponse = app
             .wrap()
             .query_wasm_smart(
@@ -543,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn test_distribute_rewards() {
+    fn test_distribute_rewards_by_agent() {
         let mut app = App::default();
         let admin = app.api().addr_make("admin");
         let user1 = app.api().addr_make("user1");
@@ -645,7 +694,7 @@ mod tests {
         let response = app.execute_contract(
             user1.clone(),
             agent_work_addr.clone(),
-            &ExecuteMsg::DistributeRewards { 
+            &ExecuteMsg::DistributeRewardsByAgent { 
                 rewards_owner_addr: user1.clone(),
                 agent_addr_list,
             },
@@ -671,5 +720,143 @@ mod tests {
                 }
             ).unwrap();
         assert_eq!(agent3_stake, Uint128::zero());
+    }
+
+    #[test]
+    fn test_distribute_rewards_by_time() {
+        let mut app = App::default();
+        let admin = app.api().addr_make("admin");
+        let user1 = app.api().addr_make("user1");
+        let user2 = app.api().addr_make("user2");
+        let agent1 = app.api().addr_make("agent1");
+        let agent2 = app.api().addr_make("agent2");
+        let agent3 = app.api().addr_make("agent3");
+
+        // set up cw20 contract
+        let cw20_addr = setup_cw20_contract(&mut app, admin.clone());
+        // set up agent work contract
+        let agent_work_addr = setup_agent_work_contract(&mut app, admin.clone(), cw20_addr.clone());
+        // allocate 500 TTK to user1, user2, agent1, agent2, agent3
+        allocate_token(&mut app, admin.clone(), cw20_addr.clone(), user1.clone(), user2.clone(), agent1.clone(), agent2.clone(), agent3.clone());
+    
+        
+        // user1 give allowance and stake 100 TTK
+        app.execute_contract(
+            user1.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(100),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            user1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::UserStake { 
+                amount: Uint128::new(100),
+            },
+            &[]
+        ).unwrap();        
+
+        // agent1 give allowance and stake 10 TTK
+        app.execute_contract(
+            agent1.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(10),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            agent1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::AgentStake { 
+                amount: Uint128::new(10),
+            },
+            &[]
+        ).unwrap();        
+
+        // agent2 give allowance and stake 10 TTK
+        app.execute_contract(
+            agent2.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: agent_work_addr.to_string(),
+                amount: Uint128::new(10),
+                expires: None,
+            },
+            &[]
+        ).unwrap();
+        app.execute_contract(
+            agent2.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::AgentStake { 
+                amount: Uint128::new(10),
+            },
+            &[]
+        ).unwrap(); 
+
+        let agent_cost1 = AgentCost {
+            addr: agent1.clone(),
+            cost_per_unit_time: Uint128::new(5),
+        };
+        let agent_cost2 = AgentCost {
+            addr: agent2.clone(),
+            cost_per_unit_time: Uint128::new(10),
+        };
+        let agent_list: Vec<AgentCost> = vec![agent_cost1, agent_cost2];
+        let response = app.execute_contract(
+            user1.clone(),
+            agent_work_addr.clone(),
+            &ExecuteMsg::DistributeRewardsByTime { 
+                rewards_owner_addr: user1.clone(),
+                agent_list,
+            },
+            &[]
+        ).unwrap();
+
+        // check whether current user1 balance is 400 and user1 stake is 85
+        let user1_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: user1.to_string(),
+                }
+            ).unwrap();
+        assert_eq!(user1_balance.balance, Uint128::new(400));
+        let user1_stake: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetUserStake {
+                    user_addr: user1.clone(),
+                }
+            ).unwrap();
+        assert_eq!(user1_stake, Uint128::new(85));
+
+        // check whether current agent1 balance is 495 and agent1 stake is 10
+        let agent1_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: agent1.to_string(),
+                }
+            ).unwrap();
+        assert_eq!(agent1_balance.balance, Uint128::new(495));
+        let agent1_stake: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &agent_work_addr,
+                &QueryMsg::GetAgentStake {
+                    agent_addr: agent1.clone(),
+                }
+            ).unwrap();
+        assert_eq!(agent1_stake, Uint128::new(10));
     }
 }

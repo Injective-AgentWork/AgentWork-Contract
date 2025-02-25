@@ -8,6 +8,12 @@ pub struct InstantiateMsg {
 }
 
 #[cw_serde]
+pub struct AgentCost {
+    pub addr: Addr,
+    pub cost_per_unit_time: Uint128,
+}
+
+#[cw_serde]
 pub enum ExecuteMsg {
     UserStake {
         amount: Uint128,
@@ -21,10 +27,14 @@ pub enum ExecuteMsg {
     AgentUnstake {
         amount: Uint128,
     },
-    DistributeRewards {
+    DistributeRewardsByAgent {
         rewards_owner_addr: Addr,
         agent_addr_list: Vec<Addr>,
     },
+    DistributeRewardsByTime {
+        rewards_owner_addr: Addr,
+        agent_list: Vec<AgentCost>,
+    }
 }
 
 #[cw_serde]
@@ -42,6 +52,12 @@ pub enum QueryMsg {
 
     #[returns(TokenInfoResponse)]
     GetTokenInfo {},
+
+    #[returns(bool)]
+    CheckIfEnoughRewards {
+        rewards_owner_addr: Addr,
+        agent_list: Vec<AgentCost>,
+    }
 }
 
 #[cw_serde]
