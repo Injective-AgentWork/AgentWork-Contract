@@ -45,14 +45,10 @@ pub enum ExecuteMsg {
 #[derive(QueryResponses)]
 pub enum QueryMsg {
     #[returns(Uint128)]
-    GetUserStake {
-        user_addr: Addr,
-    },
+    GetUserStake { user_addr: Addr },
 
     #[returns(Uint128)]
-    GetAgentStake {
-        agent_addr: Addr,
-    },
+    GetAgentStake { agent_addr: Addr },
 
     #[returns(TokenInfoResponse)]
     GetTokenInfo {},
@@ -65,7 +61,6 @@ pub enum QueryMsg {
 
     #[returns(VoteResultResponse)]
     GetVoteResult {},
-    
 }
 
 #[cw_serde]
