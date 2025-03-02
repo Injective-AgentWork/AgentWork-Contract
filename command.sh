@@ -15,7 +15,7 @@ yes 12345678 | injectived tx wasm store artifacts/injective_agent_work.wasm \
 # Instantiate the contract
 # CODE_ID = 24751
 # INJ_ADDRESS = inj1z0ax5ypjskzhcsxhdz6sh5twvjdc6e4ta4f3rq
-INIT='{"token_symbol": "MYT", "token_contract_addr": "inj1mgqj43w6f7pfqqfaa9t29gph6gje368ydzwvnc"}'
+INIT='{"token_symbol": "AWT", "token_contract_addr": "inj1wp6x43895dewtfugkv08tvu7ajmvthzvel5mwn"}'
 yes 12345678 | injectived tx wasm instantiate $CODE_ID "$INIT" \
 --label="Instantiate Injective Agent Work" \
 --from=$(echo $INJ_ADDRESS) \
@@ -24,6 +24,26 @@ yes 12345678 | injectived tx wasm instantiate $CODE_ID "$INIT" \
 --gas=2000000 \
 --no-admin \
 --node=https://testnet.sentry.tm.injective.network:443
+
+# Query balance of specific address
+BALANCE_QUERY='{"balance": {"address": "inj1z0ax5ypjskzhcsxhdz6sh5twvjdc6e4ta4f3rq"}}'
+injectived query wasm contract-state smart inj1wp6x43895dewtfugkv08tvu7ajmvthzvel5mwn "$BALANCE_QUERY" \
+--node=https://testnet.sentry.tm.injective.network:443 \
+--output json 
+
+# Query allowance of user for contract
+ALLOWANCE_QUERY='{"allowance": {"owner": "inj1z0ax5ypjskzhcsxhdz6sh5twvjdc6e4ta4f3rq", "spender": "inj1t4wjgtsa020mzqss072kq720qsphle4rmufm8v"}}'
+injectived query wasm contract-state smart inj1wp6x43895dewtfugkv08tvu7ajmvthzvel5mwn "$ALLOWANCE_QUERY" \
+--node=https://testnet.sentry.tm.injective.network:443 \
+--output json 
+
+# Increase allowance of user for contract
+INCREASE_ALLOWANCE='{"increase_allowance":{"spender": "inj1t4wjgtsa020mzqss072kq720qsphle4rmufm8v", "amount":"100", "expires": null}}'
+yes 12345678 | injectived tx wasm execute inj1wp6x43895dewtfugkv08tvu7ajmvthzvel5mwn "$INCREASE_ALLOWANCE" --from=$(echo $INJ_ADDRESS) \
+--chain-id="injective-888" \
+--yes --fees=1000000000000000inj --gas=2000000 \
+--node=https://testnet.sentry.tm.injective.network:443 \
+--output json
 
 # User stake to contract
 USER_STAKE='{"user_stake":{"amount":"100"}}'
@@ -50,7 +70,7 @@ yes 12345678 | injectived tx wasm execute inj1t4wjgtsa020mzqss072kq720qsphle4rmu
 # AGENT_INJ_ADDRESS = inj19r9a7jxj5d2mh7487a4rtn32d6l5mq5zf6tm2g
 # Increase allowance for Agent1
 INCREASE_ALLOWANCE='{"increase_allowance":{"spender": "inj1t4wjgtsa020mzqss072kq720qsphle4rmufm8v", "amount":"20", "expires": null}}'
-yes 12345678 | injectived tx wasm execute inj1mgqj43w6f7pfqqfaa9t29gph6gje368ydzwvnc "$INCREASE_ALLOWANCE" --from=$(echo $AGENT_INJ_ADDRESS) \
+yes 12345678 | injectived tx wasm execute inj1wp6x43895dewtfugkv08tvu7ajmvthzvel5mwn "$INCREASE_ALLOWANCE" --from=$(echo $AGENT_INJ_ADDRESS) \
 --chain-id="injective-888" \
 --yes --fees=1000000000000000inj --gas=2000000 \
 --node=https://testnet.sentry.tm.injective.network:443 \
@@ -58,7 +78,7 @@ yes 12345678 | injectived tx wasm execute inj1mgqj43w6f7pfqqfaa9t29gph6gje368ydz
 
 # Get allowance for Agent1
 ALLOWANCE_QUERY='{"allowance": {"owner": "inj19r9a7jxj5d2mh7487a4rtn32d6l5mq5zf6tm2g", "spender": "inj1t4wjgtsa020mzqss072kq720qsphle4rmufm8v"}}'
-injectived query wasm contract-state smart inj1mgqj43w6f7pfqqfaa9t29gph6gje368ydzwvnc "$ALLOWANCE_QUERY" \
+injectived query wasm contract-state smart inj1wp6x43895dewtfugkv08tvu7ajmvthzvel5mwn "$ALLOWANCE_QUERY" \
 --node=https://testnet.sentry.tm.injective.network:443 \
 --output json 
 
