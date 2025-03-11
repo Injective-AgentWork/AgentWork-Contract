@@ -340,6 +340,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetUserStake { user_addr , job_id} => query::get_user_stake(deps, user_addr, job_id),
         QueryMsg::GetAgentStake { agent_addr , job_id} => query::get_agent_stake(deps, agent_addr, job_id),
+        QueryMsg::GetNumOfAgent { job_id } => query::get_num_of_agent(deps, job_id),
         QueryMsg::GetTokenInfo {} => query::get_token_info(deps),
         QueryMsg::CheckIfEnoughRewards {job_id} => to_json_binary(&query::check_if_enough_rewards(
             deps,
@@ -364,6 +365,11 @@ pub mod query {
             .load(deps.storage, (agent_addr, job_id.to_string()))
             .unwrap_or(Uint128::zero());
         to_json_binary(&agent_stake_amount)
+    }
+
+    pub fn get_num_of_agent(deps: Deps, job_id: Uint128) -> StdResult<Binary> {
+        let job_agent_addrs = JOB_AGENT.load(deps.storage, job_id.to_string()).unwrap();
+        to_json_binary(&Uint128::new(job_agent_addrs.len() as u128))
     }
 
     pub fn get_token_info(deps: Deps) -> StdResult<Binary> {

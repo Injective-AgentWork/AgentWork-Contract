@@ -53,6 +53,11 @@ pub enum QueryMsg {
         job_id: Uint128
     },
 
+    #[returns(Uint128)]
+    GetNumOfAgent {
+        job_id: Uint128
+    },
+
     #[returns(TokenInfoResponse)]
     GetTokenInfo {},
 
