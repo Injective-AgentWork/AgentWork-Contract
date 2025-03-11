@@ -8,32 +8,29 @@ pub struct InstantiateMsg {
 }
 
 #[cw_serde]
-pub struct AgentCost {
-    pub addr: Addr,
-    pub cost_per_unit_time: Uint128,
-}
-
-#[cw_serde]
 pub enum ExecuteMsg {
     UserStake {
         amount: Uint128,
+        job_id: Uint128,
     },
     UserUnstake {
         amount: Uint128,
+        job_id: Uint128,
     },
     AgentStake {
         amount: Uint128,
+        job_id: Uint128,
+        cost_per_unit_time: Uint128,
     },
     AgentUnstake {
         amount: Uint128,
+        job_id: Uint128,
     },
     DistributeRewardsByAgent {
-        rewards_owner_addr: Addr,
-        agent_addr_list: Vec<Addr>,
+        job_id: Uint128
     },
     DistributeRewardsByTime {
-        rewards_owner_addr: Addr,
-        agent_list: Vec<AgentCost>,
+        job_id: Uint128
     },
     JurorVote {
         is_accept: bool,
@@ -45,18 +42,23 @@ pub enum ExecuteMsg {
 #[derive(QueryResponses)]
 pub enum QueryMsg {
     #[returns(Uint128)]
-    GetUserStake { user_addr: Addr },
+    GetUserStake { 
+        user_addr: Addr,
+        job_id: Uint128
+    },
 
     #[returns(Uint128)]
-    GetAgentStake { agent_addr: Addr },
+    GetAgentStake { 
+        agent_addr: Addr,
+        job_id: Uint128
+    },
 
     #[returns(TokenInfoResponse)]
     GetTokenInfo {},
 
     #[returns(bool)]
     CheckIfEnoughRewards {
-        rewards_owner_addr: Addr,
-        agent_list: Vec<AgentCost>,
+        job_id: Uint128
     },
 
     #[returns(VoteResultResponse)]

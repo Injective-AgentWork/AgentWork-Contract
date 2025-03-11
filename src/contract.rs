@@ -6,7 +6,7 @@ use cosmwasm_std::{
 // use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{AgentCost, ExecuteMsg, InstantiateMsg, QueryMsg, VoteResultResponse};
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, VoteResultResponse};
 use crate::state::*;
 
 /*
@@ -42,18 +42,12 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::UserStake { amount } => execute::user_stake(deps, env, info, amount),
-        ExecuteMsg::UserUnstake { amount } => execute::user_unstake(deps, info, amount),
-        ExecuteMsg::AgentStake { amount } => execute::agent_stake(deps, env, info, amount),
-        ExecuteMsg::AgentUnstake { amount } => execute::agent_unstake(deps, info, amount),
-        ExecuteMsg::DistributeRewardsByAgent {
-            rewards_owner_addr,
-            agent_addr_list,
-        } => execute::distribute_rewards_by_agent(deps, rewards_owner_addr, agent_addr_list),
-        ExecuteMsg::DistributeRewardsByTime {
-            rewards_owner_addr,
-            agent_list,
-        } => execute::distribute_rewards_by_time(deps, rewards_owner_addr, agent_list),
+        ExecuteMsg::UserStake { amount, job_id} => execute::user_stake(deps, env, info, amount, job_id),
+        ExecuteMsg::UserUnstake { amount, job_id} => execute::user_unstake(deps, info, amount, job_id),
+        ExecuteMsg::AgentStake { amount, job_id, cost_per_unit_time} => execute::agent_stake(deps, env, info, amount, job_id, cost_per_unit_time),
+        ExecuteMsg::AgentUnstake { amount, job_id} => execute::agent_unstake(deps, info, amount, job_id),
+        ExecuteMsg::DistributeRewardsByAgent {job_id} => execute::distribute_rewards_by_agent(deps, job_id),
+        ExecuteMsg::DistributeRewardsByTime {job_id} => execute::distribute_rewards_by_time(deps, job_id),
         ExecuteMsg::JurorVote { is_accept } => execute::juror_vote(deps, info, is_accept),
         ExecuteMsg::ResetVote {} => execute::reset_vote(deps),
     }
@@ -68,13 +62,23 @@ pub mod execute {
         env: Env,
         info: MessageInfo,
         amount: Uint128,
+        job_id: Uint128
     ) -> Result<Response, ContractError> {
+        if let Some(job_owner) = JOB_OWNER.may_load(deps.storage, job_id.to_string())? {
+            if job_owner != info.sender {
+                return Err(ContractError::NotJobOwner {});
+            }
+        } else {
+            JOB_OWNER.save(deps.storage, job_id.to_string(), &info.sender)?;
+        }
+        
+
         let token_info = TOKEN_INFO.load(deps.storage)?;
         let mut user_stake_amount = USER_STAKE
-            .load(deps.storage, info.sender.clone())
+            .load(deps.storage, (info.sender.clone(), job_id.to_string()))
             .unwrap_or(Uint128::zero());
         user_stake_amount += amount;
-        USER_STAKE.save(deps.storage, info.sender.clone(), &user_stake_amount)?;
+        USER_STAKE.save(deps.storage, (info.sender.clone(), job_id.to_string()), &user_stake_amount)?;
 
         let transfer_from_msg = cw20::Cw20ExecuteMsg::TransferFrom {
             owner: info.sender.to_string(),
@@ -97,17 +101,24 @@ pub mod execute {
         deps: DepsMut,
         info: MessageInfo,
         amount: Uint128,
+        job_id: Uint128
     ) -> Result<Response, ContractError> {
+        let job_owner = JOB_OWNER.load(deps.storage, job_id.to_string()).unwrap_or(info.sender.clone());
+        if job_owner != info.sender {
+            return Err(ContractError::NotJobOwner {});
+        }
+
         let token_info = TOKEN_INFO.load(deps.storage)?;
         let mut user_stake_amount = USER_STAKE
-            .load(deps.storage, info.sender.clone())
+            .load(deps.storage, (info.sender.clone(), job_id.to_string()))
             .unwrap_or(Uint128::zero());
         if user_stake_amount < amount {
             return Err(ContractError::InsufficientStake {});
         } else {
             user_stake_amount -= amount;
         };
-        USER_STAKE.save(deps.storage, info.sender.clone(), &user_stake_amount)?;
+        USER_STAKE.save(deps.storage, (info.sender.clone(), job_id.to_string()), &user_stake_amount)?;
+        
 
         let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
             recipient: info.sender.to_string(),
@@ -130,13 +141,21 @@ pub mod execute {
         env: Env,
         info: MessageInfo,
         amount: Uint128,
+        job_id: Uint128,
+        cost_per_unit_time: Uint128
     ) -> Result<Response, ContractError> {
         let token_info = TOKEN_INFO.load(deps.storage)?;
         let mut agent_stake_amount = AGENT_STAKE
-            .load(deps.storage, info.sender.clone())
+            .load(deps.storage, (info.sender.clone(), job_id.to_string()))
             .unwrap_or(Uint128::zero());
         agent_stake_amount += amount;
-        AGENT_STAKE.save(deps.storage, info.sender.clone(), &agent_stake_amount)?;
+        AGENT_STAKE.save(deps.storage, (info.sender.clone(), job_id.to_string()), &agent_stake_amount)?;
+        JOB_AGENT.update(deps.storage, job_id.to_string(), |agents| -> StdResult<_> {
+            let mut agents = agents.unwrap_or(vec![]);
+            agents.push(info.sender.clone());
+            Ok(agents)
+        })?;
+        AGENT_COST.save(deps.storage, info.sender.clone(), &cost_per_unit_time)?;
 
         let transfer_from_msg = cw20::Cw20ExecuteMsg::TransferFrom {
             owner: info.sender.to_string(),
@@ -159,17 +178,23 @@ pub mod execute {
         deps: DepsMut,
         info: MessageInfo,
         amount: Uint128,
+        job_id: Uint128
     ) -> Result<Response, ContractError> {
         let token_info = TOKEN_INFO.load(deps.storage)?;
         let mut agent_stake_amount = AGENT_STAKE
-            .load(deps.storage, info.sender.clone())
+            .load(deps.storage, (info.sender.clone(), job_id.to_string()))
             .unwrap_or(Uint128::zero());
         if agent_stake_amount < amount {
             return Err(ContractError::InsufficientStake {});
         } else {
             agent_stake_amount -= amount;
         };
-        AGENT_STAKE.save(deps.storage, info.sender.clone(), &agent_stake_amount)?;
+        AGENT_STAKE.save(deps.storage, (info.sender.clone(), job_id.to_string()), &agent_stake_amount)?;
+        JOB_AGENT.update(deps.storage, job_id.to_string(), |agents| -> StdResult<_> {
+            let mut agents = agents.unwrap_or(vec![]);
+            agents.retain(|agent| agent != &info.sender);
+            Ok(agents)
+        })?;
 
         let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
             recipient: info.sender.to_string(),
@@ -189,30 +214,31 @@ pub mod execute {
 
     pub fn distribute_rewards_by_agent(
         deps: DepsMut,
-        rewards_owner_addr: Addr,
-        agent_addr_list: Vec<Addr>,
+        job_id: Uint128
     ) -> Result<Response, ContractError> {
         let token_info = TOKEN_INFO.load(deps.storage)?;
+        let job_owner_addr = JOB_OWNER.load(deps.storage, job_id.to_string()).unwrap();
         let mut rewards_owner_stake_amount = USER_STAKE
-            .load(deps.storage, rewards_owner_addr.clone())
+            .load(deps.storage, (job_owner_addr.clone(), job_id.to_string()))
             .unwrap_or(Uint128::zero());
+        let job_agent_addrs = JOB_AGENT.load(deps.storage, job_id.to_string()).unwrap();
         let rewards_per_agent =
-            rewards_owner_stake_amount / Uint128::from(agent_addr_list.len() as u128);
+            rewards_owner_stake_amount / Uint128::from(job_agent_addrs.len() as u128);
         rewards_owner_stake_amount = Uint128::zero();
         USER_STAKE.save(
             deps.storage,
-            rewards_owner_addr.clone(),
+            (job_owner_addr.clone(), job_id.to_string()),
             &rewards_owner_stake_amount,
         )?;
         let mut messages: Vec<CosmosMsg> = vec![];
-        for agent_addr in agent_addr_list {
+        for agent_addr in job_agent_addrs {
             // repay staked amount for agent
             let mut agent_stake_amount = AGENT_STAKE
-                .load(deps.storage, agent_addr.clone())
+                .load(deps.storage, ((agent_addr).clone(), job_id.to_string()))
                 .unwrap_or(Uint128::zero());
             let repay_amount = agent_stake_amount + rewards_per_agent;
             agent_stake_amount = Uint128::zero();
-            AGENT_STAKE.save(deps.storage, agent_addr.clone(), &agent_stake_amount)?;
+            AGENT_STAKE.save(deps.storage, (agent_addr.clone(), job_id.to_string()), &agent_stake_amount)?;
 
             // send rewards to agent
             let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
@@ -234,31 +260,30 @@ pub mod execute {
 
     pub fn distribute_rewards_by_time(
         deps: DepsMut,
-        rewards_owner_addr: Addr,
-        agent_list: Vec<AgentCost>,
+        job_id: Uint128
     ) -> Result<Response, ContractError> {
         let token_info = TOKEN_INFO.load(deps.storage)?;
+        let job_owner_addr = JOB_OWNER.load(deps.storage, job_id.to_string()).unwrap();
         let mut rewards_owner_stake_amount = USER_STAKE
-            .load(deps.storage, rewards_owner_addr.clone())
+            .load(deps.storage, (job_owner_addr.clone(), job_id.to_string()))
             .unwrap_or(Uint128::zero());
+        let job_agent_addrs = JOB_AGENT.load(deps.storage, job_id.to_string()).unwrap(); 
         if !query::check_if_enough_rewards(
             deps.as_ref(),
-            rewards_owner_addr.clone(),
-            agent_list.clone(),
+            job_id
         ) {
             return Err(ContractError::InsufficientStake {});
         }
         let mut messages: Vec<CosmosMsg> = vec![];
         let mut total_cost_per_unit_time = Uint128::zero();
-        for agent in agent_list {
-            let agent_addr = agent.addr;
-            let cost_per_unit_time = agent.cost_per_unit_time;
-            total_cost_per_unit_time += cost_per_unit_time;
+        for agent_addr in job_agent_addrs {
+            let agent_cost = AGENT_COST.load(deps.storage, agent_addr.clone()).unwrap();
+            total_cost_per_unit_time += agent_cost;
 
             // send rewards to agent
             let transfer_msg = cw20::Cw20ExecuteMsg::Transfer {
                 recipient: agent_addr.to_string(),
-                amount: cost_per_unit_time,
+                amount: agent_cost,
             };
 
             let msg = CosmosMsg::Wasm(WasmMsg::Execute {
@@ -271,7 +296,7 @@ pub mod execute {
         rewards_owner_stake_amount -= total_cost_per_unit_time;
         USER_STAKE.save(
             deps.storage,
-            rewards_owner_addr.clone(),
+            (job_owner_addr.clone(), job_id.to_string()),
             &rewards_owner_stake_amount,
         )?;
         Ok(Response::new()
@@ -313,16 +338,12 @@ pub mod execute {
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetUserStake { user_addr } => query::get_user_stake(deps, user_addr),
-        QueryMsg::GetAgentStake { agent_addr } => query::get_agent_stake(deps, agent_addr),
+        QueryMsg::GetUserStake { user_addr , job_id} => query::get_user_stake(deps, user_addr, job_id),
+        QueryMsg::GetAgentStake { agent_addr , job_id} => query::get_agent_stake(deps, agent_addr, job_id),
         QueryMsg::GetTokenInfo {} => query::get_token_info(deps),
-        QueryMsg::CheckIfEnoughRewards {
-            rewards_owner_addr,
-            agent_list,
-        } => to_json_binary(&query::check_if_enough_rewards(
+        QueryMsg::CheckIfEnoughRewards {job_id} => to_json_binary(&query::check_if_enough_rewards(
             deps,
-            rewards_owner_addr,
-            agent_list,
+            job_id
         )),
         QueryMsg::GetVoteResult {} => query::get_vote_result(deps),
     }
@@ -331,16 +352,16 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 pub mod query {
     use super::*;
 
-    pub fn get_user_stake(deps: Deps, user_addr: Addr) -> StdResult<Binary> {
+    pub fn get_user_stake(deps: Deps, user_addr: Addr, job_id: Uint128) -> StdResult<Binary> {
         let user_stake_amount = USER_STAKE
-            .load(deps.storage, user_addr)
+            .load(deps.storage, (user_addr, job_id.to_string()))
             .unwrap_or(Uint128::zero());
         to_json_binary(&user_stake_amount)
     }
 
-    pub fn get_agent_stake(deps: Deps, agent_addr: Addr) -> StdResult<Binary> {
+    pub fn get_agent_stake(deps: Deps, agent_addr: Addr, job_id: Uint128) -> StdResult<Binary> {
         let agent_stake_amount = AGENT_STAKE
-            .load(deps.storage, agent_addr)
+            .load(deps.storage, (agent_addr, job_id.to_string()))
             .unwrap_or(Uint128::zero());
         to_json_binary(&agent_stake_amount)
     }
@@ -352,15 +373,17 @@ pub mod query {
 
     pub fn check_if_enough_rewards(
         deps: Deps,
-        rewards_owner_addr: Addr,
-        agent_list: Vec<AgentCost>,
+        job_id: Uint128
     ) -> bool {
+        let job_owner_addr = JOB_OWNER.load(deps.storage, job_id.to_string()).unwrap();
+        let job_owner_addrs = JOB_AGENT.load(deps.storage, job_id.to_string()).unwrap();
         let rewards_owner_stake_amount = USER_STAKE
-            .load(deps.storage, rewards_owner_addr)
+            .load(deps.storage, (job_owner_addr, job_id.to_string()))
             .unwrap_or(Uint128::zero());
         let mut total_cost_per_unit_time = Uint128::zero();
-        for agent in agent_list {
-            total_cost_per_unit_time += agent.cost_per_unit_time;
+        for agent_addr in job_owner_addrs {
+            let agent_cost = AGENT_COST.load(deps.storage, agent_addr.clone()).unwrap();
+            total_cost_per_unit_time += agent_cost;
         }
         rewards_owner_stake_amount >= total_cost_per_unit_time
     }
@@ -548,6 +571,7 @@ mod tests {
                 agent_work_addr.clone(),
                 &ExecuteMsg::UserStake {
                     amount: Uint128::new(200),
+                    job_id: Uint128::new(1),
                 },
                 &[],
             )
@@ -574,6 +598,7 @@ mod tests {
                 &agent_work_addr,
                 &QueryMsg::GetUserStake {
                     user_addr: user1.clone(),
+                    job_id: Uint128::new(1),
                 },
             )
             .unwrap();
@@ -586,6 +611,7 @@ mod tests {
                 agent_work_addr.clone(),
                 &ExecuteMsg::UserUnstake {
                     amount: Uint128::new(100),
+                    job_id: Uint128::new(1),
                 },
                 &[],
             )
@@ -612,6 +638,7 @@ mod tests {
                 &agent_work_addr,
                 &QueryMsg::GetUserStake {
                     user_addr: user1.clone(),
+                    job_id: Uint128::new(1),
                 },
             )
             .unwrap();
@@ -662,6 +689,8 @@ mod tests {
                 agent_work_addr.clone(),
                 &ExecuteMsg::AgentStake {
                     amount: Uint128::new(200),
+                    job_id: Uint128::new(1),
+                    cost_per_unit_time: Uint128::new(10),
                 },
                 &[],
             )
@@ -688,6 +717,7 @@ mod tests {
                 &agent_work_addr,
                 &QueryMsg::GetAgentStake {
                     agent_addr: agent1.clone(),
+                    job_id: Uint128::new(1),
                 },
             )
             .unwrap();
@@ -700,6 +730,7 @@ mod tests {
                 agent_work_addr.clone(),
                 &ExecuteMsg::AgentUnstake {
                     amount: Uint128::new(100),
+                    job_id: Uint128::new(1),
                 },
                 &[],
             )
@@ -722,6 +753,7 @@ mod tests {
                 &agent_work_addr,
                 &QueryMsg::GetAgentStake {
                     agent_addr: agent1.clone(),
+                    job_id: Uint128::new(1),
                 },
             )
             .unwrap();
@@ -771,6 +803,7 @@ mod tests {
             agent_work_addr.clone(),
             &ExecuteMsg::UserStake {
                 amount: Uint128::new(100),
+                job_id: Uint128::new(1),
             },
             &[],
         )
@@ -793,6 +826,8 @@ mod tests {
             agent_work_addr.clone(),
             &ExecuteMsg::AgentStake {
                 amount: Uint128::new(10),
+                job_id: Uint128::new(1),
+                cost_per_unit_time: Uint128::new(10),
             },
             &[],
         )
@@ -815,6 +850,8 @@ mod tests {
             agent_work_addr.clone(),
             &ExecuteMsg::AgentStake {
                 amount: Uint128::new(10),
+                job_id: Uint128::new(1),
+                cost_per_unit_time: Uint128::new(10),
             },
             &[],
         )
@@ -837,20 +874,20 @@ mod tests {
             agent_work_addr.clone(),
             &ExecuteMsg::AgentStake {
                 amount: Uint128::new(10),
+                job_id: Uint128::new(1),
+                cost_per_unit_time: Uint128::new(10),
             },
             &[],
         )
         .unwrap();
 
         // distribute rewards
-        let agent_addr_list: Vec<Addr> = vec![agent1.clone(), agent2.clone(), agent3.clone()];
         let response = app
             .execute_contract(
                 user1.clone(),
                 agent_work_addr.clone(),
                 &ExecuteMsg::DistributeRewardsByAgent {
-                    rewards_owner_addr: user1.clone(),
-                    agent_addr_list,
+                    job_id: Uint128::new(1)
                 },
                 &[],
             )
@@ -873,6 +910,7 @@ mod tests {
                 &agent_work_addr,
                 &QueryMsg::GetAgentStake {
                     agent_addr: agent3.clone(),
+                    job_id: Uint128::new(1),
                 },
             )
             .unwrap();
@@ -922,6 +960,7 @@ mod tests {
             agent_work_addr.clone(),
             &ExecuteMsg::UserStake {
                 amount: Uint128::new(100),
+                job_id: Uint128::new(1),
             },
             &[],
         )
@@ -944,6 +983,8 @@ mod tests {
             agent_work_addr.clone(),
             &ExecuteMsg::AgentStake {
                 amount: Uint128::new(10),
+                job_id: Uint128::new(1),
+                cost_per_unit_time: Uint128::new(5),
             },
             &[],
         )
@@ -966,27 +1007,19 @@ mod tests {
             agent_work_addr.clone(),
             &ExecuteMsg::AgentStake {
                 amount: Uint128::new(10),
+                job_id: Uint128::new(1),
+                cost_per_unit_time: Uint128::new(10),
             },
             &[],
         )
         .unwrap();
 
-        let agent_cost1 = AgentCost {
-            addr: agent1.clone(),
-            cost_per_unit_time: Uint128::new(5),
-        };
-        let agent_cost2 = AgentCost {
-            addr: agent2.clone(),
-            cost_per_unit_time: Uint128::new(10),
-        };
-        let agent_list: Vec<AgentCost> = vec![agent_cost1, agent_cost2];
         let response = app
             .execute_contract(
                 user1.clone(),
                 agent_work_addr.clone(),
                 &ExecuteMsg::DistributeRewardsByTime {
-                    rewards_owner_addr: user1.clone(),
-                    agent_list,
+                    job_id: Uint128::new(1)
                 },
                 &[],
             )
@@ -1009,6 +1042,7 @@ mod tests {
                 &agent_work_addr,
                 &QueryMsg::GetUserStake {
                     user_addr: user1.clone(),
+                    job_id: Uint128::new(1),
                 },
             )
             .unwrap();
@@ -1031,6 +1065,7 @@ mod tests {
                 &agent_work_addr,
                 &QueryMsg::GetAgentStake {
                     agent_addr: agent1.clone(),
+                    job_id: Uint128::new(1),
                 },
             )
             .unwrap();
